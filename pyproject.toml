@@ -10,6 +10,9 @@ dependencies = [
 [project.scripts]
 proxy = "proxy.cli:main"
 
+[tool.setuptools]
+packages = ["proxy"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

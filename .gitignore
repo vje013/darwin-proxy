@@ -5,3 +5,4 @@ keys/
 .chroma/
 maps/
 .env
+*.egg-info/
