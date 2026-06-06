@@ -1,0 +1,15 @@
+[project]
+name = "darwin-proxy"
+version = "0.0.1"
+requires-python = ">=3.10"
+dependencies = [
+  "presidio-analyzer", "presidio-anonymizer", "chromadb", "faker",
+  "pydantic", "fastapi", "uvicorn[standard]", "darwin-agentic-cloud",
+]
+
+[project.scripts]
+proxy = "proxy.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
