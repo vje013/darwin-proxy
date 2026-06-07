@@ -1,18 +1,25 @@
 """Re-identification gate. k-anonymity over quasi-identifier combinations,
 applied to the abstracted dataset as a reduce step after substitution.
 
-Strips identity at substitution; this kills re-identifiability by linkage.
-A record with a fake name is still a fingerprint if its remaining fields
-(region, holdings, acquisition date) are unique. The gate generalizes those
-quasi-identifiers until every combination is shared by at least k records.
+Substitution kills identity by name. A fake-named record is still a fingerprint
+if its remaining fields (region, holdings, acquisition window) are unique. The
+gate generalizes those quasi-identifiers until every combination is shared by at
+least k records, then picks the generalization with the least information loss.
 
-Algorithm: greedy full-domain generalization to reach k, then a rollback pass
-that de-generalizes any field that isn't needed, to recover utility. This is a
-heuristic; optimal lattice search / Mondrian is a later refinement.
+Search: the QI lattice is small (a handful of fields, short ladders), so we
+enumerate it exhaustively and choose the minimal-loss combination that clears k.
+This is exact, not a greedy heuristic. If the lattice is ever too large
+(LATTICE_CAP), fall back to greedy full-domain generalization with rollback.
+
+Quasi-identifiers are linkage vectors (geography, holdings, dates). Low-cardinality
+categoricals like Share Class are signal, not QIs, and are left untouched.
 """
+import itertools
 from collections import Counter
 
 from proxy.classify import STATE_TO_REGION
+
+LATTICE_CAP = 200_000
 
 
 def _identity(v):
@@ -45,12 +52,23 @@ def _prefix(length):
     return f
 
 
+def _year_bucket(span):
+    def f(v):
+        s = "" if v is None else str(v)
+        try:
+            y = int(s[:4])
+        except (ValueError, TypeError):
+            return _suppress(v)
+        lo = (y // span) * span
+        return f"{lo}-{lo + span - 1}"
+    return f
+
+
 # Per-field generalization ladders. Level 0 = most specific, last = suppressed.
 DEFAULT_QI = {
     "State": [_identity, _region, _suppress],
-    "Share Class": [_identity, _suppress],
-    "Shares Owned": [_identity, _band(10000), _band(50000), _suppress],
-    "Acquisition Date": [_identity, _prefix(7), _prefix(4), _suppress],
+    "Shares Owned": [_identity, _band(10000), _band(50000), _band(100000), _suppress],
+    "Acquisition Date": [_identity, _prefix(7), _prefix(4), _year_bucket(5), _suppress],
 }
 
 
@@ -69,14 +87,27 @@ def _classes(rows, fields, qi, levels):
     return len({_qi_tuple(r, fields, qi, levels) for r in rows})
 
 
-def apply_gate(rows, qi_config=None, k_threshold=5, max_rounds=64):
-    qi = qi_config or DEFAULT_QI
-    fields = [f for f in qi if rows and f in rows[0]]
+def _lattice_search(rows, fields, qi, k_threshold):
+    """Exhaustive: minimal normalized information loss subject to k >= threshold."""
+    maxlevel = [len(qi[f]) - 1 for f in fields]
+    best = None  # ((loss, -k), levels_dict)
+    for combo in itertools.product(*[range(m + 1) for m in maxlevel]):
+        levels = dict(zip(fields, combo))
+        k = _min_k(rows, fields, qi, levels)
+        if k >= k_threshold:
+            loss = sum(combo[i] / maxlevel[i] for i in range(len(fields)) if maxlevel[i])
+            score = (loss, -k)
+            if best is None or score < best[0]:
+                best = (score, levels)
+    if best is None:
+        return None
+    return best[1]
+
+
+def _greedy(rows, fields, qi, k_threshold, max_rounds=64):
+    """Fallback for large lattices: widen toward k, then roll back for utility."""
     levels = {f: 0 for f in fields}
-
     k = _min_k(rows, fields, qi, levels)
-
-    # Greedy: widen toward k. Pick the step that most raises k, then most merges.
     rounds = 0
     while k < k_threshold and rounds < max_rounds:
         candidates = [f for f in fields if levels[f] < len(qi[f]) - 1]
@@ -92,8 +123,6 @@ def apply_gate(rows, qi_config=None, k_threshold=5, max_rounds=64):
         levels[best_field] += 1
         k = _min_k(rows, fields, qi, levels)
         rounds += 1
-
-    # Rollback: recover utility by de-generalizing any field that isn't needed.
     if k >= k_threshold:
         improved = True
         while improved:
@@ -105,7 +134,31 @@ def apply_gate(rows, qi_config=None, k_threshold=5, max_rounds=64):
                         improved = True
                     else:
                         levels[f] += 1
-        k = _min_k(rows, fields, qi, levels)
+    return levels
+
+
+def apply_gate(rows, qi_config=None, k_threshold=5):
+    qi = qi_config or DEFAULT_QI
+    fields = [f for f in qi if rows and f in rows[0]]
+
+    if not fields:
+        k = len(rows)
+        result = {"k": k, "threshold": k_threshold, "passed": k >= k_threshold,
+                  "quasi_identifiers": [], "generalized": {}}
+        return [dict(r) for r in rows], result
+
+    lattice_size = 1
+    for f in fields:
+        lattice_size *= len(qi[f])
+
+    levels = None
+    if lattice_size <= LATTICE_CAP:
+        levels = _lattice_search(rows, fields, qi, k_threshold)
+    if levels is None:
+        levels = _greedy(rows, fields, qi, k_threshold)
+
+    k = _min_k(rows, fields, qi, levels)
+    passed = k >= k_threshold
 
     gated = []
     for r in rows:
@@ -118,7 +171,7 @@ def apply_gate(rows, qi_config=None, k_threshold=5, max_rounds=64):
     result = {
         "k": k,
         "threshold": k_threshold,
-        "passed": k >= k_threshold,
+        "passed": passed,
         "quasi_identifiers": fields,
         "generalized": {f: levels[f] for f in fields if levels[f] > 0},
     }
