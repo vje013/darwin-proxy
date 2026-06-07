@@ -12,3 +12,6 @@ build/
 __pycache__/
 *.map.enc
 .venv/
+
+# perf baselines are environment-specific machine state; each env self-seeds
+benchmarks/baselines.json

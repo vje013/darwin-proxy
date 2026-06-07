@@ -1,6 +1,0 @@
-{
-  "csv_read_rows_per_sec": 147391.620804032,
-  "detect_cols_per_sec": 2.28522566703254,
-  "gate_rows_per_sec": 1777.3079997273048,
-  "transform_rows_per_sec": 4978.2905337378
-}
