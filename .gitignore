@@ -6,3 +6,9 @@ keys/
 maps/
 .env
 *.egg-info/
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.map.enc
+.venv/
