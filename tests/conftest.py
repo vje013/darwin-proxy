@@ -35,12 +35,6 @@ def _blank_engine():
 
 
 @pytest.fixture(scope="session")
-def scanner():
-    from proxy.detect import FinanceScanner
-    return FinanceScanner(nlp_engine=_blank_engine())
-
-
-@pytest.fixture(scope="session")
 def hash_embedder():
     import hashlib
     from chromadb.api.types import EmbeddingFunction, Documents, Embeddings

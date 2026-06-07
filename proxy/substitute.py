@@ -20,7 +20,6 @@ import os
 
 from faker import Faker
 
-from proxy.classify import REGIONS, SECTOR_COMPANIES
 from proxy.maps import MapStore
 
 POOL_SEED = 1729
@@ -148,51 +147,3 @@ class Substitutor:
         # default: match the input's digit count so column width is preserved
         n = sum(c.isdigit() for c in value) or 10
         return d[:max(n, 4)]
-
-    def substitute(self, field, entity_type, value, semantic_class):
-        hit = self._cached(field, value)
-        if hit is not None:
-            return hit
-        return self._remember(field, value, self._generate(field, entity_type, value, semantic_class))
-
-    def _generate(self, field, entity_type, value, sc):
-        if entity_type == "PERSON" and field == "First Name":
-            g = sc.attributes.get("gender", "unknown")
-            pool = POOLS["male"] if g in ("male", "mostly_male") else \
-                POOLS["female"] if g in ("female", "mostly_female") else POOLS["first"]
-            return self._pick(pool, field, value)
-        if entity_type == "PERSON":
-            return self._pick(POOLS["last"], field, value)
-        if field == "State":
-            region = sc.attributes.get("region")
-            pool = REGIONS.get(region) or POOLS["word"]
-            return self._pick(pool, field, value)
-        if field == "City":
-            return self._pick(POOLS["city"], field, value)
-        if field == "Country":
-            return self._pick(POOLS["country"], field, value)
-        if entity_type == "ORG":
-            sector = sc.attributes.get("sector")
-            pool = SECTOR_COMPANIES.get(sector) or POOLS["company"]
-            return self._pick(pool, field, value)
-        return self._pick(POOLS["word"], field, value)
-
-    def substitute_format(self, field, entity_type, value):
-        hit = self._cached(field, value)
-        if hit is not None:
-            return hit
-        mac = hmac.new(self.key, f"{field}|{value}".encode("utf-8"), hashlib.sha256).hexdigest()
-        digits = "".join(str(int(c, 16) % 10) for c in mac)
-        if entity_type == "PHONE":
-            repl = f"({digits[:3]}) {digits[3:6]}-{digits[6:10]}"
-        else:
-            repl = f"{digits[:2]}-{digits[2:9]}"
-        return self._remember(field, value, repl)
-
-    def derive_email(self, field, value, context):
-        hit = self._cached(field, value)
-        if hit is not None:
-            return hit
-        first = context.get("First Name", "user")
-        last = context.get("Last Name", "anon")
-        return self._remember(field, value, f"{first.lower()}.{last.lower()}@example.com")

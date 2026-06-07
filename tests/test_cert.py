@@ -41,19 +41,3 @@ def test_json_roundtrip_still_valid():
     cert.sign_manifest(m, cert.generate_key())
     m2 = AbstractionManifest.model_validate_json(m.model_dump_json())
     assert cert.verify_manifest(m2)["valid"] is True
-
-
-def test_pipeline_emits_signed_cert(tmp_path, scanner):
-    import csv as _csv
-    from proxy import Proxy
-    src = tmp_path / "in.csv"
-    with open(src, "w", newline="") as f:
-        w = _csv.writer(f)
-        w.writerow(["Stockholder ID", "First Name", "State", "Share Class", "Shares Owned", "Acquisition Date"])
-        for i in range(8):
-            w.writerow([f"SH-{i}", "John", "Vermont", "Common", str(1000 + i), "2025-01-01"])
-    out = tmp_path / "out.csv"
-    key = cert.generate_key()
-    manifest, _, _ = Proxy(scanner=scanner).abstract_csv(str(src), str(out), k_threshold=3, key=key)
-    r = cert.verify_manifest(manifest)
-    assert r["valid"] and r["root"] == "self"

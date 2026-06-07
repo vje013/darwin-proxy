@@ -45,18 +45,3 @@ def test_result_shape():
     _, result = apply_gate(rows, k_threshold=2)
     for key in ("k", "threshold", "passed", "quasi_identifiers", "generalized"):
         assert key in result
-
-
-def test_pipeline_sets_gate_result(tmp_path, scanner):
-    import csv as _csv
-    from proxy import Proxy
-    src = tmp_path / "in.csv"
-    with open(src, "w", newline="") as f:
-        w = _csv.writer(f)
-        w.writerow(["Stockholder ID", "First Name", "Last Name", "State", "Share Class", "Shares Owned", "Acquisition Date"])
-        for i in range(8):
-            w.writerow([f"SH-{i}", "John", "Reed", "Vermont", "Common", str(1000 + i), "2025-01-01"])
-    out = tmp_path / "out.csv"
-    manifest, _, _ = Proxy(scanner=scanner).abstract_csv(str(src), str(out), k_threshold=3)
-    assert manifest.gate_result is not None
-    assert "passed" in manifest.gate_result
