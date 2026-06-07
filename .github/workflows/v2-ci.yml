@@ -12,7 +12,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e ".[dev]"
+        run: |
+          sudo apt-get update && sudo apt-get install -y tesseract-ocr
+          pip install -e ".[dev,images]"
       - name: Test (model-free, coverage gate)
         # Suite is model-free: blank spaCy engine and hash embedder are injected.
         # Perf tests are deselected here because coverage instrumentation distorts
