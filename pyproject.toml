@@ -26,7 +26,7 @@ dependencies = [
 formats = ["openpyxl", "pyarrow"]
 sql = ["sqlalchemy"]
 images = ["presidio-image-redactor"]
-dev = ["pytest", "pytest-cov", "hypothesis"]
+dev = ["pytest", "pytest-cov", "hypothesis", "openpyxl", "pyarrow", "sqlalchemy"]
 
 [project.urls]
 Homepage = "https://github.com/vje013/darwin-proxy"
@@ -35,8 +35,8 @@ Repository = "https://github.com/vje013/darwin-proxy"
 [project.scripts]
 proxy = "proxy.cli:main"
 
-[tool.setuptools]
-packages = ["proxy"]
+[tool.setuptools.packages.find]
+include = ["proxy*"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=proxy --cov-report=term-missing -q"
