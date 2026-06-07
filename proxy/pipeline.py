@@ -11,14 +11,15 @@ from proxy.detect import classify_fields, Mode, FinanceScanner, redact_inline
 from proxy.classify import SemanticClassifier
 from proxy.substitute import Substitutor
 from proxy.gate import apply_gate
+from proxy.cert import sign_manifest, load_or_create_key
 from proxy.schemas import AbstractionManifest
 
 
 class Proxy:
-    def __init__(self, seed=42):
+    def __init__(self, seed=42, scanner=None):
         self.classifier = SemanticClassifier()
         self.substitutor = Substitutor(seed=seed)
-        self.scanner = FinanceScanner()
+        self.scanner = scanner if scanner is not None else FinanceScanner()
 
     def abstract_record(self, record, policy=None):
         modes = classify_fields(record, policy)
@@ -56,7 +57,7 @@ class Proxy:
 
         return out, semantic_classes, inline_spans
 
-    def abstract_csv(self, input_path, output_path, policy=None, k_threshold=5):
+    def abstract_csv(self, input_path, output_path, policy=None, k_threshold=5, sign=True, key=None):
         with open(input_path, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
@@ -93,6 +94,8 @@ class Proxy:
             before_hash=_sha256(input_path),
             after_hash=_sha256(output_path),
         )
+        if sign:
+            sign_manifest(manifest, key or load_or_create_key())
         return manifest, rows, out_rows
 
 

@@ -47,7 +47,7 @@ def test_result_shape():
         assert key in result
 
 
-def test_pipeline_sets_gate_result(tmp_path):
+def test_pipeline_sets_gate_result(tmp_path, scanner):
     import csv as _csv
     from proxy import Proxy
     src = tmp_path / "in.csv"
@@ -57,6 +57,6 @@ def test_pipeline_sets_gate_result(tmp_path):
         for i in range(8):
             w.writerow([f"SH-{i}", "John", "Reed", "Vermont", "Common", str(1000 + i), "2025-01-01"])
     out = tmp_path / "out.csv"
-    manifest, _, _ = Proxy().abstract_csv(str(src), str(out), k_threshold=3)
+    manifest, _, _ = Proxy(scanner=scanner).abstract_csv(str(src), str(out), k_threshold=3)
     assert manifest.gate_result is not None
     assert "passed" in manifest.gate_result

@@ -2,8 +2,8 @@ from proxy import Proxy
 from proxy.detect import Mode, classify_fields
 
 
-def test_signal_fields_preserved():
-    p = Proxy()
+def test_signal_fields_preserved(scanner):
+    p = Proxy(scanner=scanner)
     rec = {"First Name": "John", "Last Name": "Reed", "Shares Owned": "16249", "Share Class": "Common"}
     out, _, _ = p.abstract_record(rec)
     assert out["Shares Owned"] == "16249"   # signal untouched
