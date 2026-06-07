@@ -1,0 +1,22 @@
+name: v2-ci
+on:
+  push:
+    branches: [v2, main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Test (model-free, coverage + perf gates)
+        # Suite is model-free: blank spaCy engine and hash embedder are injected.
+        # First CI run on a new runner seeds perf baselines; commit them, then the
+        # gate guards regressions within that runner.
+        env:
+          PROXY_UPDATE_BASELINES: ${{ vars.SEED_BASELINES || '' }}
+        run: pytest --cov-fail-under=85
