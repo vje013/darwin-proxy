@@ -1,146 +1,159 @@
-"""CLI:
-  proxy abstract <input.csv> [-o output.csv] [--k 5] [--cert path] [--key path] [--no-sign]
-  proxy verify <cert.json> [--darwin-root HEX]
+"""Darwin Proxy CLI (v2), on the Proxy orchestrator.
+
+  proxy abstract <input> [-o out.csv] [--k N] [--mode oneway|map|encrypt]
+        [--lang en] [--qi col,col] [--key PEM] [--no-sign]
+        [--map-path P] [--map-secret-env VAR] [--ttl S]
+  proxy verify <manifest.json> [--output out.csv] [--darwin-root HEX]
+  proxy reverse <input.csv> -o <out.csv> --manifest <m.json>
+        --map <map.enc> [--secret-env VAR]
+  proxy serve [--host H] [--port N]
 """
 import argparse
+import json
 import os
 
-from proxy.pipeline import Proxy
-from proxy.cert import load_or_create_key, verify_manifest, DEFAULT_KEY_PATH
-from proxy.schemas import AbstractionManifest
-from proxy.substitute import POOL_KEY_ENV
+from proxy.cert import DEFAULT_KEY_PATH, load_or_create_key, verify_manifest
+from proxy.certify import recheck
+from proxy.ingest import read
+from proxy.schemas_v2 import AbstractionManifestV2
+
+MAP_SECRET_DEFAULT = "PROXY_MAP_SECRET"
 
 
-def main():
-    parser = argparse.ArgumentParser(prog="proxy", description="Darwin Proxy: semantic redaction")
-    sub = parser.add_subparsers(dest="command", required=True)
+def _build_proxy(args):
+    """Construct the orchestrator. Isolated so tests can inject a model-free engine."""
+    from proxy.orchestrator import Proxy
+    key = None if getattr(args, "no_sign", False) else load_or_create_key(getattr(args, "key", DEFAULT_KEY_PATH))
+    return Proxy(language=getattr(args, "lang", "en"), k_threshold=getattr(args, "k", 5),
+                 round_trip=(getattr(args, "mode", "oneway") == "map"), signing_key=key)
 
-    a = sub.add_parser("abstract", help="abstract a CSV and write a signed certificate")
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="proxy", description="Darwin Proxy: semantic redaction")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    a = sub.add_parser("abstract", help="abstract a file and write a signed certificate")
     a.add_argument("input")
     a.add_argument("-o", "--output", default="abstracted.csv")
-    a.add_argument("--k", type=int, default=5, help="k-anonymity threshold")
-    a.add_argument("--cert", default=None, help="certificate path (default <output>.cert.json)")
-    a.add_argument("--key", default=DEFAULT_KEY_PATH, help="Ed25519 signing key (PEM)")
+    a.add_argument("--k", type=int, default=5)
+    a.add_argument("--mode", choices=["oneway", "map", "encrypt"], default="oneway")
+    a.add_argument("--lang", default="en")
+    a.add_argument("--qi", default=None, help="comma-separated columns to force as quasi-identifiers")
+    a.add_argument("--key", default=DEFAULT_KEY_PATH)
     a.add_argument("--no-sign", action="store_true")
-    a.add_argument("--round-trip", action="store_true", help="persist an encrypted reversible map")
-    a.add_argument("--map-path", default=None, help="map path (default <output>.map.enc)")
-    a.add_argument("--map-secret-env", default="PROXY_MAP_SECRET", help="env var holding the map secret")
-    a.add_argument("--ttl", type=int, default=None, help="map time-to-live in seconds")
-    a.add_argument("--sample", type=int, default=5)
+    a.add_argument("--map-path", default=None)
+    a.add_argument("--map-secret-env", default=MAP_SECRET_DEFAULT)
+    a.add_argument("--ttl", type=int, default=None)
 
-    v = sub.add_parser("verify", help="verify a certificate and report its trust root")
-    v.add_argument("cert")
-    v.add_argument("--darwin-root", default=None, help="Darwin authority root pubkey (hex)")
+    v = sub.add_parser("verify", help="re-check a certificate")
+    v.add_argument("manifest")
+    v.add_argument("--output", default=None, help="output artifact to recompute hash/k against")
+    v.add_argument("--darwin-root", default=None)
 
-    r = sub.add_parser("reverse", help="reverse a pseudonym using an encrypted round-trip map")
-    r.add_argument("--map", required=True, help="encrypted map path")
-    r.add_argument("--secret-env", default="PROXY_MAP_SECRET", help="env var holding the map secret")
-    r.add_argument("--field", required=True, help="field/namespace of the value")
-    r.add_argument("value")
+    r = sub.add_parser("reverse", help="reverse substituted identifiers using an encrypted map")
+    r.add_argument("input")
+    r.add_argument("-o", "--output", default="reversed.csv")
+    r.add_argument("--manifest", required=True)
+    r.add_argument("--map", required=True)
+    r.add_argument("--secret-env", default=MAP_SECRET_DEFAULT)
 
     sv = sub.add_parser("serve", help="run the HTTP service")
     sv.add_argument("--host", default="0.0.0.0")
     sv.add_argument("--port", type=int, default=8000)
 
-    args = parser.parse_args()
-    if args.command == "abstract":
-        _abstract(args)
-    elif args.command == "verify":
-        _verify(args)
-    elif args.command == "reverse":
-        _reverse(args)
-    elif args.command == "serve":
-        import uvicorn
-        uvicorn.run("proxy.api:app", host=args.host, port=args.port)
+    args = p.parse_args(argv)
+    return {"abstract": _abstract, "verify": _verify,
+            "reverse": _reverse, "serve": _serve}[args.command](args)
 
 
 def _abstract(args):
-    if args.round_trip and not os.environ.get(args.map_secret_env):
-        raise SystemExit(f"--round-trip requires the map secret in ${args.map_secret_env}")
-    proxy = Proxy(round_trip=args.round_trip)
-    key = None if args.no_sign else load_or_create_key(args.key)
-    map_path = args.map_path or (args.output + ".map.enc") if args.round_trip else None
-    map_secret = os.environ.get(args.map_secret_env) if args.round_trip else None
-    manifest, rows, out_rows = proxy.abstract_csv(
-        args.input, args.output, k_threshold=args.k, sign=not args.no_sign, key=key,
-        map_path=map_path, map_secret=map_secret, ttl_seconds=args.ttl)
-    cert_path = args.cert or (args.output + ".cert.json")
-    if not args.no_sign:
-        with open(cert_path, "w") as f:
-            f.write(manifest.model_dump_json(indent=2))
-    _print_report(manifest, rows, out_rows, args.sample,
-                  cert_path if not args.no_sign else None, map_path)
-
-
-def _reverse(args):
-    from proxy.maps import MapStore, fernet_from_secret
-    secret = os.environ.get(args.secret_env)
-    if not secret:
-        raise SystemExit(f"map secret not found in ${args.secret_env}")
-    store = MapStore.load(args.map, fernet_from_secret(secret))
-    original = store.reverse(args.field, args.value)
-    if original is None:
-        print("not found")
-        raise SystemExit(1)
-    print(original)
+    if args.mode == "map" and not os.environ.get(args.map_secret_env):
+        raise SystemExit(f"--mode map requires the map secret in ${args.map_secret_env}")
+    qi_config = None
+    if args.qi:
+        from proxy.gate import _band, _identity, _suppress
+        qi_config = {c: [_identity, _band(10000), _suppress] for c in args.qi.split(",")}
+    proxy = _build_proxy(args)
+    out_path, manifest = proxy.abstract_file(
+        args.input, args.output, reversibility=args.mode, qi_config=qi_config,
+        sign=not args.no_sign)
+    if args.mode == "map":
+        map_path = args.map_path or (args.output + ".map.enc")
+        proxy.transformer.save_map(map_path, os.environ[args.map_secret_env], args.ttl)
+        print(f"map:        {map_path} (encrypted, round-trip)")
+    _report(manifest, out_path)
+    return 0
 
 
 def _verify(args):
-    with open(args.cert) as f:
-        manifest = AbstractionManifest.model_validate_json(f.read())
-    r = verify_manifest(manifest, darwin_root=args.darwin_root)
+    with open(args.manifest) as f:
+        manifest = AbstractionManifestV2.model_validate_json(f.read())
+    if args.output:
+        rep = recheck(manifest, read(args.output), darwin_root=args.darwin_root)
+        sig, ka = rep["signature"], rep["k_anonymity"]
+    else:
+        sig = verify_manifest(manifest, darwin_root=args.darwin_root)
+        ka = None
     root_label = {"darwin": "Darwin-certified (authority root)",
                   "self": "Self-signed (OSS self-attestation)",
-                  "none": "unverified"}[r["root"]]
-    g = manifest.gate_result or {}
+                  "none": "unverified"}[sig["root"]]
     print("=" * 78)
     print("DARWIN PROXY - Certificate Verification")
     print("=" * 78)
     print(f"doc_id:     {manifest.doc_id}")
-    print(f"timestamp:  {manifest.timestamp}")
-    print(f"signature:  {'VALID' if r['valid'] else 'INVALID'}")
+    print(f"signature:  {'VALID' if sig['valid'] else 'INVALID'}")
     print(f"trust root: {root_label}")
-    print(f"signer:     {r['signer'][:32]}..." if r["signer"] else "signer:     (none)")
     print(f"records:    {manifest.records}")
-    if g:
-        print(f"gate:       k={g.get('k')} [{'PASS' if g.get('passed') else 'FAIL'}]")
-    if manifest.inline_redactions:
-        print(f"inline:     {manifest.inline_redactions}")
-    raise SystemExit(0 if r["valid"] else 1)
+    print(f"reversible: {manifest.reversibility}")
+    if ka is not None:
+        if ka.get("assessed"):
+            print(f"k-anonymity: recomputed k={ka['recomputed_k']} (threshold {ka['threshold']}) "
+                  f"[{'CERTIFIED' if ka['certified'] else 'FAILED'}]")
+        else:
+            print(f"k-anonymity: NOT ASSESSED ({ka.get('reason')})")
+    raise SystemExit(0 if sig["valid"] else 1)
 
 
-def _print_report(manifest, rows, out_rows, sample, cert_path, map_path=None):
-    g = manifest.gate_result or {}
+def _reverse(args):
+    from proxy.maps import MapStore, fernet_from_secret
+    from proxy.transform import Transformer
+    secret = os.environ.get(args.secret_env)
+    if not secret:
+        raise SystemExit(f"map secret not found in ${args.secret_env}")
+    with open(args.manifest) as f:
+        manifest = AbstractionManifestV2.model_validate_json(f.read())
+    tr = Transformer(round_trip=True)
+    tr.substitutor.store = MapStore.load(args.map, fernet_from_secret(secret))
+    restored = tr.reverse_table(read(args.input), manifest.detection)
+    restored.df.to_csv(args.output, index=False)
+    print(f"reversed -> {args.output}")
+    return 0
+
+
+def _serve(args):
+    import uvicorn
+    uvicorn.run("proxy.service:app", host=args.host, port=args.port)
+
+
+def _report(manifest, out_path):
+    g = manifest.gate or {}
     print("=" * 78)
     print("DARWIN PROXY - Semantic Abstraction Complete")
     print("=" * 78)
-    print(f"Records:    {manifest.records}")
-    print(f"Abstracted: {', '.join(manifest.fields_abstracted)}")
-    print(f"Preserved:  {', '.join(manifest.fields_preserved)}")
-    print(f"Before:     {manifest.before_hash[:16]}...")
-    print(f"After:      {manifest.after_hash[:16]}...")
-    status = "PASS" if g.get("passed") else "FAIL"
-    print(f"Re-id gate: k={g.get('k')} (threshold {g.get('threshold')}) [{status}]")
-    if g.get("generalized"):
-        print(f"Generalized: {g['generalized']}")
-    if manifest.inline_redactions:
-        print(f"Inline:     {manifest.inline_redactions}")
-    keyed = "keyed (env)" if os.environ.get(POOL_KEY_ENV) else "ephemeral (run-scoped, one-way)"
-    print(f"Pseudonym:  {keyed}")
-    if map_path:
-        print(f"Map:        {map_path} (encrypted, round-trip)")
+    print(f"records:    {manifest.records}")
+    print(f"detected:   {manifest.detection}")
+    print(f"operators:  {manifest.operators}")
+    print(f"kept:       {', '.join(manifest.kept_columns)}")
+    print(f"reversible: {manifest.reversibility}")
+    if g.get("assessed"):
+        print(f"re-id gate: k={g.get('k')} (threshold {g.get('threshold')}) "
+              f"[{'PASS' if g.get('passed') else 'FAIL'}]")
+    else:
+        print(f"re-id gate: NOT ASSESSED ({g.get('reason')})")
     if manifest.signature:
-        print(f"Signed:     self ({manifest.signer_pubkey[:16]}...)")
-        print(f"Cert:       {cert_path}")
-    show = ["First Name", "Last Name", "Email", "State", "Shares Owned", "Acquisition Date"]
-    show = [s for s in show if rows and s in rows[0]]
-    print(f"\nSAMPLE TRANSFORM (first {sample}):")
-    print("-" * 78)
-    for i in range(min(sample, len(rows))):
-        rid = rows[i].get("Stockholder ID", f"row {i}")
-        print(f"\n  {rid}:")
-        for field in show:
-            print(f"    {field:18s} {str(rows[i][field]):26s} -> {out_rows[i][field]}")
+        print(f"signed:     self ({manifest.signer_pubkey[:16]}...)")
+    print(f"output:     {out_path}")
+    print(f"cert:       {out_path}.manifest.json")
 
 
 if __name__ == "__main__":
