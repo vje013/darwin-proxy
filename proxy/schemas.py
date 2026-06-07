@@ -42,6 +42,7 @@ class AbstractionManifest(BaseModel):
     fields_preserved: list[str] = Field(default_factory=list)
     semantic_classes: list[SemanticClass] = Field(default_factory=list)
     gate_result: dict | None = None
+    inline_redactions: dict | None = None
     before_hash: str = ""
     after_hash: str = ""
     signature: str = ""

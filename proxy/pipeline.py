@@ -1,13 +1,13 @@
 """The Proxy pipeline. abstract_record() for one dict, abstract_csv() for a file.
 Output: abstracted data + an AbstractionManifest (the cert-to-be).
 
-The gate runs as a reduce step over the whole abstracted dataset, so it lives
-in abstract_csv, not abstract_record.
+Column policy handles structured fields. The FinanceScanner handles inline PII in
+free-text SIGNAL fields. The re-id gate runs last as a reduce over the dataset.
 """
 import csv
 import hashlib
 
-from proxy.detect import classify_fields, Mode
+from proxy.detect import classify_fields, Mode, FinanceScanner, redact_inline
 from proxy.classify import SemanticClassifier
 from proxy.substitute import Substitutor
 from proxy.gate import apply_gate
@@ -18,6 +18,7 @@ class Proxy:
     def __init__(self, seed=42):
         self.classifier = SemanticClassifier()
         self.substitutor = Substitutor(seed=seed)
+        self.scanner = FinanceScanner()
 
     def abstract_record(self, record, policy=None):
         modes = classify_fields(record, policy)
@@ -43,7 +44,17 @@ class Proxy:
             if mode == Mode.DERIVED:
                 out[field] = self.substitutor.derive_email(field, value, context)
 
-        return out, semantic_classes
+        # Pass 3: inline scan of free-text SIGNAL fields (no column rule needed)
+        inline_spans = []
+        for field, value in record.items():
+            _, mode = modes[field]
+            if mode == Mode.SIGNAL and isinstance(value, str):
+                spans = self.scanner.scan(value)
+                if spans:
+                    out[field] = redact_inline(value, spans)
+                    inline_spans.extend(spans)
+
+        return out, semantic_classes, inline_spans
 
     def abstract_csv(self, input_path, output_path, policy=None, k_threshold=5):
         with open(input_path, newline="", encoding="utf-8-sig") as f:
@@ -52,11 +63,13 @@ class Proxy:
             rows = list(reader)
 
         modes = classify_fields(rows[0], policy) if rows else {}
-        out_rows, all_classes = [], []
+        out_rows, all_classes, inline_counts = [], [], {}
         for row in rows:
-            out, scs = self.abstract_record(row, policy)
+            out, scs, spans = self.abstract_record(row, policy)
             out_rows.append(out)
             all_classes.extend(scs)
+            for s in spans:
+                inline_counts[s.entity_type] = inline_counts.get(s.entity_type, 0) + 1
 
         # Reduce step: enforce k-anonymity across the abstracted dataset.
         out_rows, gate_result = apply_gate(out_rows, k_threshold=k_threshold)
@@ -76,6 +89,7 @@ class Proxy:
             fields_preserved=preserved,
             semantic_classes=all_classes[:50],
             gate_result=gate_result,
+            inline_redactions=inline_counts or None,
             before_hash=_sha256(input_path),
             after_hash=_sha256(output_path),
         )

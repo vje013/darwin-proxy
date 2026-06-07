@@ -34,6 +34,8 @@ def _print_report(manifest, rows, out_rows, sample):
     print(f"Re-id gate: k={g.get('k')} (threshold {g.get('threshold')}) [{status}]")
     if g.get("generalized"):
         print(f"Generalized: {g['generalized']}")
+    if manifest.inline_redactions:
+        print(f"Inline:     {manifest.inline_redactions}")
     show = ["First Name", "Last Name", "Email", "State", "Shares Owned", "Acquisition Date"]
     show = [s for s in show if rows and s in rows[0]]
     print(f"\nSAMPLE TRANSFORM (first {sample}):")
