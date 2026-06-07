@@ -20,7 +20,7 @@ import os
 
 from faker import Faker
 
-from proxy.classify import REGIONS
+from proxy.classify import REGIONS, SECTOR_COMPANIES
 from proxy.maps import MapStore
 
 POOL_SEED = 1729
@@ -117,7 +117,9 @@ class Substitutor:
         if field == "Country":
             return self._pick(POOLS["country"], field, value)
         if entity_type == "ORG":
-            return self._pick(POOLS["company"], field, value)
+            sector = sc.attributes.get("sector")
+            pool = SECTOR_COMPANIES.get(sector) or POOLS["company"]
+            return self._pick(pool, field, value)
         return self._pick(POOLS["word"], field, value)
 
     def substitute_format(self, field, entity_type, value):
