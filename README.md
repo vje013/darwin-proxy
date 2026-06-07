@@ -36,7 +36,7 @@
 
 
 # BUILD UPDATE 6/7/2026
-Verdict: right now it is a single flat-table, in-memory tool that is strongest on data shaped like the stockholders file. It is not yet schema-flexible. The column policy and the re-id quasi-identifiers are hardcoded to specific English header names, and that, not file size, is the real constraint.
+Verdict: right now it is a single flat-table, in-memory tool that is not yet schema-flexible. The column policy and the re-id quasi-identifiers are hardcoded to specific English header names.
 
 ## What it handles
 
@@ -67,4 +67,8 @@ Verdict: right now it is a single flat-table, in-memory tool that is strongest o
 
 ## The honest one-paragraph summary
 
-It reliably abstracts a clean, flat, English-headered CSV that uses the expected column names, in the low thousands of rows, on a box with the spaCy and Chroma models present, and proves it with a signed certificate. The moment the schema drifts from that shape, the column names, the three QI fields, the eight known headers, it quietly does less than it appears to, because unrecognized columns fall through to signal and the gate degrades to a trivial pass. The two changes that would most widen its real range are exposing a configurable policy and a configurable QI set through the CLI and API, so it adapts to a customer's actual schema instead of the stockholders schema.
+It reliably abstracts a clean, flat, English-headered CSV that uses the expected column names, in the low thousands of rows, on a box with the spaCy and Chroma models present, and proves it with a signed certificate. 
+
+The moment the schema drifts from that shape, the column names, the three QI fields, the eight known headers, it quietly does less than it appears to, because unrecognized columns fall through to signal and the gate degrades to a trivial pass. 
+
+The two changes that would most widen its real range are exposing a configurable policy and a configurable QI set through the CLI and API, so it adapts to a customer's actual schema instead of the stockholders schema.
