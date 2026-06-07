@@ -3,7 +3,7 @@ name = "darwin-proxy"
 version = "0.1.0"
 description = "Semantic redaction: strip identity, keep signal, prove it."
 requires-python = ">=3.10"
-dependencies = ["pydantic", "faker", "gender-guesser", "presidio-analyzer>=2.2", "cryptography>=42", "chromadb>=1.0"]
+dependencies = ["pydantic", "faker", "gender-guesser", "presidio-analyzer>=2.2", "cryptography>=42", "chromadb>=1.0", "fastapi>=0.110", "uvicorn>=0.27"]
 
 [project.scripts]
 proxy = "proxy.cli:main"

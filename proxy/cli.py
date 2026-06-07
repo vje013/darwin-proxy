@@ -38,6 +38,10 @@ def main():
     r.add_argument("--field", required=True, help="field/namespace of the value")
     r.add_argument("value")
 
+    sv = sub.add_parser("serve", help="run the HTTP service")
+    sv.add_argument("--host", default="0.0.0.0")
+    sv.add_argument("--port", type=int, default=8000)
+
     args = parser.parse_args()
     if args.command == "abstract":
         _abstract(args)
@@ -45,6 +49,9 @@ def main():
         _verify(args)
     elif args.command == "reverse":
         _reverse(args)
+    elif args.command == "serve":
+        import uvicorn
+        uvicorn.run("proxy.api:app", host=args.host, port=args.port)
 
 
 def _abstract(args):
