@@ -16,9 +16,9 @@ from proxy.schemas import AbstractionManifest
 
 
 class Proxy:
-    def __init__(self, seed=42, scanner=None):
+    def __init__(self, seed=42, scanner=None, key=None, round_trip=False):
         self.classifier = SemanticClassifier()
-        self.substitutor = Substitutor(seed=seed)
+        self.substitutor = Substitutor(key=key, round_trip=round_trip)
         self.scanner = scanner if scanner is not None else FinanceScanner()
 
     def abstract_record(self, record, policy=None):
@@ -57,7 +57,8 @@ class Proxy:
 
         return out, semantic_classes, inline_spans
 
-    def abstract_csv(self, input_path, output_path, policy=None, k_threshold=5, sign=True, key=None):
+    def abstract_csv(self, input_path, output_path, policy=None, k_threshold=5, sign=True, key=None,
+                     map_path=None, map_secret=None, ttl_seconds=None):
         with open(input_path, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
@@ -96,6 +97,9 @@ class Proxy:
         )
         if sign:
             sign_manifest(manifest, key or load_or_create_key())
+        if self.substitutor.round_trip and map_path and map_secret:
+            from proxy.maps import fernet_from_secret
+            self.substitutor.store.save(map_path, fernet_from_secret(map_secret), ttl_seconds)
         return manifest, rows, out_rows
 
 
