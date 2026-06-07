@@ -147,6 +147,7 @@ def test_fuzz_corpus_no_uncaught(run_fuzz, corpus_files):
 
 # ---- perf -----------------------------------------------------------------
 
+@pytest.mark.perf
 def test_read_perf(tmp_path, perf_check):
     import time
     rows = "\n".join(f"{i},John,Vermont,{1000+i}" for i in range(5000))

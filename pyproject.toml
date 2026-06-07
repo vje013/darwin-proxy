@@ -41,6 +41,9 @@ include = ["proxy*"]
 [tool.pytest.ini_options]
 addopts = "--cov=proxy --cov-report=term-missing -q"
 testpaths = ["tests"]
+markers = [
+    "perf: real timing measurements; run outside coverage so baselines stay stable",
+]
 
 [tool.coverage.run]
 omit = ["proxy/cli.py"]

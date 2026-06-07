@@ -3,6 +3,8 @@ If these pass, the harness can catch regressions in later phases."""
 import random
 import time
 
+import pytest
+
 
 # ---- golden gate ----------------------------------------------------------
 
@@ -23,6 +25,7 @@ def test_perf_gate_detects_regression(perf_check):
     assert perf_check.evaluate(10, 25, higher_is_better=False, band=0.3) is False    # latency regression fails
 
 
+@pytest.mark.perf
 def test_perf_real_microbench(perf_check):
     from proxy.gate import apply_gate
     rows = [{"State": random.choice(["Vermont", "Texas", "Ohio", "California"]),
