@@ -1,35 +1,118 @@
-**Problem**
-- Zo lets anyone build and run a business on AI, including finance (one-person hedge funds, advisory firms, fintech)
-- The moment a finance user puts real client data (names, tax IDs, holdings) through Zo, that data gets sent to third-party AI models (OpenAI, Anthropic, MiniMax, etc.)
-- That is a compliance violation under GLBA, Reg S-P, and state privacy laws — the liability lands on the user, and Zo's "private by default" claim becomes deceptive
-- Without a fix, Zo's highest-value users (regulated finance) can't use the product on real data
+# Darwin Proxy
 
-**What Darwin Proxy Does**
-- Strips identity from sensitive records while preserving the analytical signal they carry
-- Names are gender-matched (John → Mark, not John → Danielle)
-- Locations stay in-region (Connecticut → Vermont, both Northeast)
-- Format-only fields (tax IDs, phone numbers) get structurally valid fakes
-- The same real entity always maps to the same fake entity across the entire dataset (consistency map)
-- Signal-bearing fields (share class, shares owned, acquisition date) are untouched — the data stays usable for AI
+**Destroy the identity. Keep the signal. Prove it.**
 
-**Architecture**
-- Input: raw CSV/record with PII
-- Detector: identifies and types every sensitive span (name, email, city, phone, EIN)
-- Partitioner: separates identity fields (abstract these) from environment/signal fields (keep these)
-- Semantic classifier: characterizes each value by its neighborhood (gender, region, cohort) rather than just its type
-- Substitutor: draws a concrete replacement from the same semantic neighborhood, not a random fake
-- Consistency map: keyed by entity, ensures the same person/place maps to the same replacement everywhere (reversible in round-trip mode, discardable in one-way mode)
-- Output: abstracted CSV + SHA-256 before/after hashes
+Darwin Proxy is a semantic redaction engine for financial AI agents. It strips
+identity out of a dataset while preserving the analytical signal, then issues a
+signed certificate attesting to what it did and that the result is re-identifiable
+below a stated threshold.
 
-**Workflow**
-- Finance user uploads client data to Zo
-- Proxy intercepts before data leaves the box to any third-party model
-- Identity is stripped, signal is preserved, replacements are semantically faithful
-- The AI model receives usable data with zero real PII
-- The user gets AI-powered analysis on their real dataset without ever exposing a real client
+## The problem
 
-**What's Next (full product roadmap)**
-- Signed Ed25519 attestation certificate proving exactly how data was abstracted (built on Darwin Agentic Cloud)
-- K-anonymity re-identification gate validating that no replacement is too rare to be safe
-- Chroma vector-based semantic classifier replacing heuristic matching with embedding-space neighborhoods
-- Open-core: engine free (Apache-2.0), policy packs and certification paid
+To be useful, a financial AI workflow has to send client data to third-party
+models. The moment a client's name, holdings, and account details leave the box,
+that is PII egressing to a third party, with the regulatory exposure (GLBA,
+Reg S-P, CCPA) landing on the operator. Darwin Proxy strips the identity before
+the data leaves, so the model still gets the signal and the real PII never escapes.
+
+## What it does
+
+A dataset flows through four stages:
+
+1. **Detect** which columns carry identity by their *content*, not their header
+   names, using a Presidio analyzer with the full predefined recognizer set plus
+   checksum-validated finance recognizers (SSN, ABA routing, CUSIP, ISIN, EIN,
+   account). Renamed or gibberish headers do not fool it.
+2. **Transform** each identifier. The default is keyed, signal-preserving
+   substitution: a value maps to the same realistic fake everywhere (a custom
+   Presidio operator), so joins and shape survive. An opaque AES-encrypt mode is
+   available when nothing analyzable should leave. Geography and dates are kept
+   for the gate rather than substituted.
+3. **Gate** the result on k-anonymity, generalizing quasi-identifiers (region,
+   holdings band, acquisition window) until every record shares its combination
+   with at least k others. Quasi-identifiers are inferred from the detected
+   entities, and when none are identified the gate refuses to claim k-anonymity
+   rather than silently passing.
+4. **Certify** with an Ed25519 signature over the manifest, binding the detection
+   mapping, operators, locale, reversibility mode, the gate result (including
+   whether re-identification risk was actually assessed), and the before/after
+   hashes.
+
+Reversibility has two modes: a keyed map (signal-preserving and reversible only
+via an encrypted, expiring map) and AES encrypt (opaque and reversible by key
+alone). Image inputs are supported optionally via OCR when tesseract is present.
+
+## Quickstart
+
+```bash
+pip install darwin-proxy
+python -m spacy download en_core_web_lg     # or en_core_web_sm for a lighter box
+
+# abstract a CSV, write output + a signed manifest sidecar next to it
+proxy abstract data.csv -o abstracted.csv --k 5
+
+# re-check the certificate against the output (recomputes hash and k)
+proxy verify abstracted.csv.manifest.json --output abstracted.csv
+
+# run as a service
+proxy serve --port 8000
+```
+
+Stable pseudonyms across runs require a persistent key:
+
+```bash
+export PROXY_PSEUDONYM_KEY=$(python -c "import os;print(os.urandom(32).hex())")
+```
+
+Reversible (map mode) abstraction persists an encrypted, expiring map; reverse
+restores the substituted identifiers across the whole table:
+
+```bash
+export PROXY_MAP_SECRET='a-high-entropy-secret'
+proxy abstract data.csv -o out.csv --mode map --ttl 86400
+proxy reverse out.csv -o restored.csv --manifest out.csv.manifest.json --map out.csv.map.enc
+```
+
+Opaque, key-only reversibility (no map) uses `--mode encrypt`.
+
+## Trust boundary
+
+The signed manifest is the certificate. There are two roots, one verifier.
+
+| Mode | Who holds the key | `verify` reports | Meaning |
+|------|-------------------|------------------|---------|
+| Self-signed | the operator's local key | Self-signed (OSS self-attestation) | the output is untampered; the signer is anonymous |
+| Darwin-certified | Darwin / DAC authority key only | Darwin-certified (authority root) | a trusted third party vouches |
+
+The engine self-signs for free. Only a manifest whose signer equals the configured
+Darwin root verifies as authority-rooted, and only Darwin holds that private key,
+so the open-source engine can never forge the stamp. Set `PROXY_DARWIN_ROOT` to the
+authority public key to recognize Darwin-certified manifests.
+
+What is independently re-checkable versus what requires the authority:
+
+- **Re-checkable** by anyone holding the output: the signature, the hashes, and the
+  k-anonymity claim (recompute the achieved k from the published rows; the `/verify`
+  endpoint does this when you pass the rows back).
+- **Judgment**, which the authority root vouches for: whether the methodology and
+  policy are adequate for a given regulatory regime. De-identification adequacy is a
+  statistical argument, not a proof, which is exactly why a certification authority
+  has value.
+
+## What this is and is not
+
+Darwin Proxy controls one axis: where identity goes when data leaves the box. It is
+one control, not a compliance program. It does not make an operator "compliant"
+wholesale. PII mishandling is a civil and regulatory matter, not a criminal one, and
+the precise scope of the control is the egress axis.
+
+## API
+
+`POST /abstract` (oneway or encrypt mode), `POST /verify` (re-check a manifest
+against a supplied output), `GET /healthz`, `GET /metrics`. The service is
+stateless: map mode is not a server concern, since reversing requires a
+client-held encrypted map and its secret.
+
+## License
+
+Apache-2.0. Copyright 2026 Darwin Adaptive Systems LLC.
