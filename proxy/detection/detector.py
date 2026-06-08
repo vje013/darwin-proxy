@@ -33,6 +33,9 @@ class Detector:
         analysis = builder.generate_analysis(table.df, language=language,
                                              selection_strategy=selection_strategy)
         mapping = {c: e for c, e in dict(analysis.entity_mapping).items() if e}
+        # precision pass: strict identifiers beat NER guesses, bare-int DATE_TIME demoted
+        from proxy.detection.precision import refine_mapping
+        mapping = refine_mapping(table, mapping)
         if override:
             for col, ent in override.items():
                 if ent is None:
