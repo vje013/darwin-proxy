@@ -15,3 +15,4 @@ __pycache__/
 
 # perf baselines are environment-specific machine state; each env self-seeds
 benchmarks/baselines.json
+.coverage
