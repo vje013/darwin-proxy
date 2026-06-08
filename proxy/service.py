@@ -17,7 +17,7 @@ from proxy.ingest import Table
 from proxy.orchestrator import Proxy
 from proxy.schemas_v2 import AbstractionManifestV2
 
-app = FastAPI(title="Darwin Proxy", version="2.1.0")
+app = FastAPI(title="Darwin Proxy", version="2.1.1")
 _METRICS = {"abstract": 0, "verify": 0, "errors": 0}
 _PROXY = None
 

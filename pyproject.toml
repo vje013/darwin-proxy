@@ -1,6 +1,6 @@
 [project]
 name = "darwin-proxy"
-version = "2.1.0"
+version = "2.1.1"
 description = "Semantic redaction for financial AI agents: strip identity, keep the signal, prove it with a signed certificate."
 readme = "README.md"
 requires-python = ">=3.10"
