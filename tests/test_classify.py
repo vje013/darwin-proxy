@@ -1,16 +1,16 @@
-"""Phase 5: embedding-neighborhood sector classification + sector-preserving sub.
-
-Uses a deterministic hash embedder (no model download). It tests the mechanism:
-corpus members classify to their own sector, and ORG substitution stays in-sector.
-Semantic generalization to unseen orgs needs the real embedder, validated on host.
+"""Embedding-neighborhood sector classification, model-free via a deterministic
+hash embedder. Tests the mechanism: corpus members classify to their own sector,
+and gender/region heuristics resolve. Semantic generalization to unseen orgs needs
+the real embedder, validated on host. (Sector-preserving substitution was a v1
+path retired at the v2 cutover; classify stays as optional enrichment plus the
+region tables the gate uses.)
 """
 import hashlib
 
 import pytest
-from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
-from proxy.classify import ChromaBackend, SemanticClassifier, FINANCE_CORPUS, SECTOR_COMPANIES
-from proxy.substitute import Substitutor
+from proxy.classify import ChromaBackend, SemanticClassifier
 
 _DIM = 48
 
@@ -44,24 +44,8 @@ def classifier():
 
 
 def test_corpus_member_classifies_to_its_sector(classifier):
-    sc = classifier.classify("Business Name", "ORG", "Goldman Sachs")
-    assert sc.attributes["sector"] == "Financials"
-    sc2 = classifier.classify("Business Name", "ORG", "Nvidia")
-    assert sc2.attributes["sector"] == "Technology"
-
-
-def test_org_substitution_stays_in_sector(classifier):
-    sc = classifier.classify("Business Name", "ORG", "Goldman Sachs")
-    repl = Substitutor(key="k").substitute("Business Name", "ORG", "Goldman Sachs", sc)
-    assert repl in SECTOR_COMPANIES["Financials"] and repl != "Goldman Sachs"
-
-
-def test_unknown_sector_falls_back(classifier):
-    # Backend returns a nearest sector; substitution must still produce a value.
-    from proxy.schemas import SemanticClass
-    sc = SemanticClass(field="Business Name", entity_type="ORG", attributes={"sector": "unknown"})
-    repl = Substitutor(key="k").substitute("Business Name", "ORG", "Some LLC", sc)
-    assert isinstance(repl, str) and repl != "Some LLC"
+    assert classifier.classify("Business Name", "ORG", "Goldman Sachs").attributes["sector"] == "Financials"
+    assert classifier.classify("Business Name", "ORG", "Nvidia").attributes["sector"] == "Technology"
 
 
 def test_gender_and_region_still_work(classifier):

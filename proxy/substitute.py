@@ -20,11 +20,19 @@ import os
 
 from faker import Faker
 
-from proxy.classify import REGIONS, SECTOR_COMPANIES
 from proxy.maps import MapStore
 
 POOL_SEED = 1729
 POOL_KEY_ENV = "PROXY_PSEUDONYM_KEY"
+
+# Entities whose value is an identifier with a shape worth preserving (so joins on
+# the token still work) but whose content must be destroyed. These get a
+# format-preserving HMAC token rather than a pool draw.
+FORMAT_ENTITIES = {
+    "US_SSN", "CREDIT_CARD", "US_BANK_NUMBER", "FIN_ACCOUNT", "US_ABA_ROUTING",
+    "US_EIN", "CUSIP", "ISIN", "IBAN_CODE", "PHONE_NUMBER", "US_ITIN",
+    "US_PASSPORT", "US_DRIVER_LICENSE",
+}
 
 
 def _uniq(gen, n):
@@ -94,50 +102,48 @@ class Substitutor:
     def _cached(self, field, value):
         return self._cache.get(field, {}).get(value)
 
-    def substitute(self, field, entity_type, value, semantic_class):
-        hit = self._cached(field, value)
+    # ---- v2: header-agnostic, entity-type dispatch -----------------------
+    # Namespace is the entity type, so the same value yields the same token in
+    # every column. That cross-column stability is the signal we preserve and is
+    # what the commodity operators (replace/redact/mask/hash) destroy.
+    def substitute_entity(self, entity_type, value):
+        if value == "" or value is None:
+            return value
+        ns = entity_type or "GENERIC"
+        hit = self._cached(ns, value)
         if hit is not None:
             return hit
-        return self._remember(field, value, self._generate(field, entity_type, value, semantic_class))
-
-    def _generate(self, field, entity_type, value, sc):
-        if entity_type == "PERSON" and field == "First Name":
-            g = sc.attributes.get("gender", "unknown")
-            pool = POOLS["male"] if g in ("male", "mostly_male") else \
-                POOLS["female"] if g in ("female", "mostly_female") else POOLS["first"]
-            return self._pick(pool, field, value)
+        if entity_type in FORMAT_ENTITIES:
+            return self._remember(ns, value, self._format_token(entity_type, ns, value))
         if entity_type == "PERSON":
-            return self._pick(POOLS["last"], field, value)
-        if field == "State":
-            region = sc.attributes.get("region")
-            pool = REGIONS.get(region) or POOLS["word"]
-            return self._pick(pool, field, value)
-        if field == "City":
-            return self._pick(POOLS["city"], field, value)
-        if field == "Country":
-            return self._pick(POOLS["country"], field, value)
-        if entity_type == "ORG":
-            sector = sc.attributes.get("sector")
-            pool = SECTOR_COMPANIES.get(sector) or POOLS["company"]
-            return self._pick(pool, field, value)
-        return self._pick(POOLS["word"], field, value)
-
-    def substitute_format(self, field, entity_type, value):
-        hit = self._cached(field, value)
-        if hit is not None:
-            return hit
-        mac = hmac.new(self.key, f"{field}|{value}".encode("utf-8"), hashlib.sha256).hexdigest()
-        digits = "".join(str(int(c, 16) % 10) for c in mac)
-        if entity_type == "PHONE":
-            repl = f"({digits[:3]}) {digits[3:6]}-{digits[6:10]}"
+            first = self._pick(POOLS["first"], ns + ":first", value)
+            last = self._pick(POOLS["last"], ns + ":last", value)
+            repl = f"{first} {last}"
+        elif entity_type == "EMAIL_ADDRESS":
+            first = self._pick(POOLS["first"], ns + ":first", value).lower()
+            last = self._pick(POOLS["last"], ns + ":last", value).lower()
+            repl = f"{first}.{last}@example.com"
+        elif entity_type in ("ORG", "ORGANIZATION", "NRP"):
+            repl = self._pick(POOLS["company"], ns, value)
+        elif entity_type in ("LOCATION", "GPE"):
+            repl = self._pick(POOLS["city"], ns, value)
         else:
-            repl = f"{digits[:2]}-{digits[2:9]}"
-        return self._remember(field, value, repl)
+            repl = self._pick(POOLS["word"], ns, value)
+        return self._remember(ns, value, repl)
 
-    def derive_email(self, field, value, context):
-        hit = self._cached(field, value)
-        if hit is not None:
-            return hit
-        first = context.get("First Name", "user")
-        last = context.get("Last Name", "anon")
-        return self._remember(field, value, f"{first.lower()}.{last.lower()}@example.com")
+    def _format_token(self, entity_type, ns, value):
+        mac = hmac.new(self.key, f"{ns}|{value}".encode("utf-8"), hashlib.sha256).hexdigest()
+        d = "".join(str(int(c, 16) % 10) for c in mac)
+        if entity_type == "US_SSN":
+            return f"{d[:3]}-{d[3:5]}-{d[5:9]}"
+        if entity_type == "US_EIN":
+            return f"{d[:2]}-{d[2:9]}"
+        if entity_type == "PHONE_NUMBER":
+            return f"({d[:3]}) {d[3:6]}-{d[6:10]}"
+        if entity_type == "CREDIT_CARD":
+            return d[:16]
+        if entity_type in ("US_ABA_ROUTING", "CUSIP"):
+            return d[:9]
+        # default: match the input's digit count so column width is preserved
+        n = sum(c.isdigit() for c in value) or 10
+        return d[:max(n, 4)]

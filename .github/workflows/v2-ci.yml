@@ -1,0 +1,28 @@
+name: v2-ci
+on:
+  push:
+    branches: [v2, main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y tesseract-ocr
+          pip install -e ".[dev,images]"
+      - name: Test (model-free, coverage gate)
+        # Suite is model-free: blank spaCy engine and hash embedder are injected.
+        # Perf tests are deselected here because coverage instrumentation distorts
+        # timings; they run in their own step below without coverage.
+        run: pytest -m "not perf" --cov-fail-under=85
+      - name: Perf gates (no coverage, stable baselines)
+        # First CI run on a new runner seeds perf baselines; commit them, then the
+        # gate guards regressions within that runner. No coverage => stable numbers.
+        env:
+          PROXY_UPDATE_BASELINES: ${{ vars.SEED_BASELINES || '' }}
+        run: pytest -m perf --no-cov
