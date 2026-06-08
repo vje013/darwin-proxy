@@ -176,3 +176,79 @@ def apply_gate(rows, qi_config=None, k_threshold=5):
         "generalized": {f: levels[f] for f in fields if levels[f] > 0},
     }
     return gated, result
+
+
+# ---- v2: content-based QI inference + Table gate with trivial-pass guard ----
+# The v1 footgun: with no qi_config it falls back to hardcoded header names, so a
+# renamed-header dataset produces zero QIs and the gate "passes" with k=len(rows),
+# claiming k-anonymity it never checked. v2 infers QIs from the detection mapping
+# (by entity, not header) and refuses to certify when no QIs were assessed.
+
+GEO_ENTITIES = {"LOCATION", "GPE", "NRP_LOCATION"}
+DATE_ENTITIES = {"DATE_TIME"}
+
+
+def infer_qi_config(mapping):
+    """Build generalization ladders from detected entities, header-agnostic.
+    Geography and dates are the linkage vectors that survive substitution."""
+    qi = {}
+    for col, ent in (mapping or {}).items():
+        if ent in GEO_ENTITIES:
+            qi[col] = [_identity, _region, _suppress]
+        elif ent in DATE_ENTITIES:
+            qi[col] = [_identity, _prefix(7), _prefix(4), _year_bucket(5), _suppress]
+    return qi
+
+
+def apply_gate_table(table, mapping=None, qi_config=None, k_threshold=5, require_qi=True):
+    """k-anonymity over a Table. QIs come from the detection mapping (inferred by
+    entity) unioned with any explicit qi_config. If no QIs are identified the gate
+    does NOT silently pass: it records assessed=False and trivial_pass=True so the
+    certificate cannot claim k-anonymity that was never measured."""
+    import pandas as pd
+
+    from proxy.ingest import Table
+
+    qi = dict(infer_qi_config(mapping))
+    if qi_config:
+        qi.update(qi_config)
+    rows = table.to_rows()
+    fields = [f for f in qi if f in table.columns]
+
+    if not fields:
+        result = {
+            "k": None, "threshold": k_threshold,
+            "passed": (not require_qi),
+            "assessed": False, "trivial_pass": True,
+            "quasi_identifiers": [], "generalized": {},
+            "reason": "no quasi-identifiers identified; re-identification risk not assessed",
+        }
+        return Table(table.df.copy()), result
+
+    lattice_size = 1
+    for f in fields:
+        lattice_size *= len(qi[f])
+    levels = _lattice_search(rows, fields, qi, k_threshold) if lattice_size <= LATTICE_CAP else None
+    if levels is None:
+        levels = _greedy(rows, fields, qi, k_threshold)
+
+    k = _min_k(rows, fields, qi, levels)
+    passed = k >= k_threshold
+
+    cols = list(table.df.columns)
+    gated = []
+    for r in rows:
+        nr = dict(r)
+        for f in fields:
+            if levels[f] > 0:
+                nr[f] = qi[f][levels[f]](r.get(f))
+        gated.append(nr)
+
+    result = {
+        "k": k, "threshold": k_threshold, "passed": passed,
+        "assessed": True, "trivial_pass": False,
+        "quasi_identifiers": fields,
+        "generalized": {f: levels[f] for f in fields if levels[f] > 0},
+        "reason": None,
+    }
+    return Table(pd.DataFrame(gated, columns=cols)), result
