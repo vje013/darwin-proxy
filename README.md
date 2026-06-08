@@ -75,6 +75,28 @@ proxy reverse out.csv -o restored.csv --manifest out.csv.manifest.json --map out
 
 Opaque, key-only reversibility (no map) uses `--mode encrypt`.
 
+## Performance
+
+Detection (spaCy NER plus the recognizers) is the cost; transform and the gate are
+negligible by comparison. Measured on the reference box, detection throughput:
+
+| configuration | rows/s | note |
+|---|---|---|
+| unbatched (old default) | ~40 | one document at a time |
+| batched (current default) | ~137 | ~3.4x, result-identical, no flag needed |
+| `--model en_core_web_sm` | ~158 | lighter model, lower NER accuracy |
+| `--sample-size 200` | ~1500 | types columns from a sample; may miss sparse PII |
+| `--fast` (no NER) | ~380 | pattern-only; skips name/org/location detection |
+
+Guidance. Batching is on by default and changes nothing about the result. For
+structured financial data that does not need name/org/location detection, `--fast`
+runs pattern-only at several times the speed and records `detection_mode:
+pattern-only` in the certificate so the omission is on the record. For large,
+homogeneous tables, `--sample-size N` makes detection roughly independent of row
+count, at the cost of possibly missing PII that is sparse within a column;
+exhaustive (no sampling) is the default precisely because under-detection is the
+unsafe direction. `--model en_core_web_sm` trades NER accuracy for speed.
+
 ## Trust boundary
 
 The signed manifest is the certificate. There are two roots, one verifier.

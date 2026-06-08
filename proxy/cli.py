@@ -24,8 +24,12 @@ def _build_proxy(args):
     """Construct the orchestrator. Isolated so tests can inject a model-free engine."""
     from proxy.orchestrator import Proxy
     key = None if getattr(args, "no_sign", False) else load_or_create_key(getattr(args, "key", DEFAULT_KEY_PATH))
+    ner = not (getattr(args, "no_ner", False) or getattr(args, "fast", False))
     return Proxy(language=getattr(args, "lang", "en"), k_threshold=getattr(args, "k", 5),
-                 round_trip=(getattr(args, "mode", "oneway") == "map"), signing_key=key)
+                 round_trip=(getattr(args, "mode", "oneway") == "map"), signing_key=key,
+                 ner=ner, model=getattr(args, "model", None),
+                 batch_size=getattr(args, "batch_size", 32),
+                 sample_size=getattr(args, "sample_size", None))
 
 
 def main(argv=None):
@@ -44,6 +48,12 @@ def main(argv=None):
     a.add_argument("--map-path", default=None)
     a.add_argument("--map-secret-env", default=MAP_SECRET_DEFAULT)
     a.add_argument("--ttl", type=int, default=None)
+    a.add_argument("--fast", action="store_true", help="pattern-only, no NER (fastest; skips name/org/location)")
+    a.add_argument("--no-ner", action="store_true", help="alias for --fast")
+    a.add_argument("--model", default=None, help="spaCy model, e.g. en_core_web_sm for speed")
+    a.add_argument("--batch-size", type=int, default=32)
+    a.add_argument("--sample-size", type=int, default=None,
+                   help="type columns from a sample of N rows (large homogeneous data; may miss sparse PII)")
 
     v = sub.add_parser("verify", help="re-check a certificate")
     v.add_argument("manifest")

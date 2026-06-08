@@ -77,3 +77,23 @@ def test_abstract_json_output(tmp_path):
     cli.main(["abstract", str(src), "-o", out])
     assert (tmp_path / "out.json").exists()
     assert (tmp_path / "out.json.manifest.json").exists()
+
+
+def test_fast_flag_sets_pattern_only(tmp_path, monkeypatch):
+    # --fast must produce a pattern-only manifest; capture the proxy the CLI builds
+    captured = {}
+    real_build = cli._build_proxy
+
+    def spy(args):
+        px = Proxy(nlp_engine=_Blank(), signing_key=generate_key(),
+                   k_threshold=getattr(args, "k", 5),
+                   ner=not (getattr(args, "no_ner", False) or getattr(args, "fast", False)))
+        captured["ner"] = px.detector.ner
+        return px
+    monkeypatch.setattr(cli, "_build_proxy", spy)
+    src = tmp_path / "in.csv"; src.write_text(CSV)
+    out = str(tmp_path / "out.csv")
+    cli.main(["abstract", str(src), "-o", out, "--fast"])
+    import json
+    m = json.loads((tmp_path / "out.csv.manifest.json").read_text())
+    assert captured["ner"] is False and m["detection_mode"] == "pattern-only"

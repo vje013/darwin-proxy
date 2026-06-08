@@ -18,12 +18,12 @@ from proxy.transform import Transformer
 class Proxy:
     def __init__(self, key=None, language="en", k_threshold=5, round_trip=False,
                  nlp_engine=None, score_threshold=0.5, signing_key=None, batch_size=32,
-                 ner=True):
+                 ner=True, model=None, sample_size=None):
         self.language = language
         self.k_threshold = k_threshold
-        self.detector = Detector(nlp_engine=nlp_engine, languages=(language,),
+        self.detector = Detector(nlp_engine=nlp_engine, model=model, languages=(language,),
                                  score_threshold=score_threshold, batch_size=batch_size,
-                                 ner=ner)
+                                 ner=ner, sample_size=sample_size)
         self.transformer = Transformer(key=key, round_trip=round_trip)
         self._signing_key = signing_key
 

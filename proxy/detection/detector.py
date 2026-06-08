@@ -13,7 +13,8 @@ from proxy.detection.engine import blank_nlp_engine, build_analyzer
 
 class Detector:
     def __init__(self, nlp_engine=None, model=None, languages=("en",),
-                 score_threshold=0.5, finance=True, batch_size=32, ner=True):
+                 score_threshold=0.5, finance=True, batch_size=32, ner=True,
+                 sample_size=None):
         if not ner and nlp_engine is None:
             nlp_engine = blank_nlp_engine(languages[0])   # pattern-only, no model/NER cost
         self._build_kwargs = dict(nlp_engine=nlp_engine, model=model,
@@ -21,6 +22,7 @@ class Detector:
         self.score_threshold = score_threshold
         self.batch_size = batch_size
         self.ner = ner
+        self.sample_size = sample_size    # None = exhaustive (never-miss default); int caps NER work per column
         self._analyzer = None
 
     @property
@@ -30,12 +32,13 @@ class Detector:
         return self._analyzer
 
     def analyze_table(self, table, language="en", override=None, entities=None,
-                      selection_strategy="most_common"):
+                      selection_strategy="most_common", sample_size=None):
         from presidio_structured import PandasAnalysisBuilder
         builder = PandasAnalysisBuilder(analyzer=self.analyzer,
                                         analyzer_score_threshold=self.score_threshold,
                                         batch_size=self.batch_size)
-        analysis = builder.generate_analysis(table.df, language=language,
+        n = sample_size if sample_size is not None else self.sample_size
+        analysis = builder.generate_analysis(table.df, n=n, language=language,
                                              selection_strategy=selection_strategy)
         mapping = {c: e for c, e in dict(analysis.entity_mapping).items() if e}
         # precision pass: strict identifiers beat NER guesses, bare-int DATE_TIME demoted
