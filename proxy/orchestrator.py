@@ -17,11 +17,13 @@ from proxy.transform import Transformer
 
 class Proxy:
     def __init__(self, key=None, language="en", k_threshold=5, round_trip=False,
-                 nlp_engine=None, score_threshold=0.5, signing_key=None, batch_size=32):
+                 nlp_engine=None, score_threshold=0.5, signing_key=None, batch_size=32,
+                 ner=True):
         self.language = language
         self.k_threshold = k_threshold
         self.detector = Detector(nlp_engine=nlp_engine, languages=(language,),
-                                 score_threshold=score_threshold, batch_size=batch_size)
+                                 score_threshold=score_threshold, batch_size=batch_size,
+                                 ner=ner)
         self.transformer = Transformer(key=key, round_trip=round_trip)
         self._signing_key = signing_key
 
@@ -45,7 +47,8 @@ class Proxy:
             records=table.n_rows, source_format=source_format or table.source_format,
             language=self.language, detection=mapping, kept_columns=kept,
             operators=operators, reversibility=reversibility,
-            gate_result=gate_result, before_table=table, after_table=gated)
+            gate_result=gate_result, before_table=table, after_table=gated,
+            detection_mode="full" if self.detector.ner else "pattern-only")
         if sign:
             from proxy.cert import sign_manifest
             sign_manifest(manifest, self._key())

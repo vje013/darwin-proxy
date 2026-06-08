@@ -17,6 +17,7 @@ class AbstractionManifestV2(BaseModel):
     source_format: str = "dataframe"        # csv|json|excel|parquet|sql|image|dataframe
     language: str = "en"
     policy: str = "content-based"
+    detection_mode: str = "full"          # full (NER+pattern) | pattern-only (no NER, names not scanned)
     detection: dict[str, str] = Field(default_factory=dict)   # column -> entity
     kept_columns: list[str] = Field(default_factory=list)     # QI/signal pass-through
     operators: dict[str, str] = Field(default_factory=dict)   # entity -> operator name

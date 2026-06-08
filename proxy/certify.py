@@ -23,11 +23,12 @@ def hash_table(table):
 
 def build_manifest(*, records, detection, kept_columns, operators, reversibility,
                    gate_result, before_table, after_table, source_format="dataframe",
-                   language="en", policy="content-based"):
+                   language="en", policy="content-based", detection_mode="full"):
     return AbstractionManifestV2(
         records=records, source_format=source_format, language=language, policy=policy,
         detection=dict(detection), kept_columns=list(kept_columns),
         operators=dict(operators), reversibility=reversibility, gate=gate_result,
+        detection_mode=detection_mode,
         before_hash=hash_table(before_table), after_hash=hash_table(after_table))
 
 

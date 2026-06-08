@@ -8,16 +8,19 @@ override {col: "PERSON"} forces a type, {col: None} forces the column to be kept
 Bias is toward detection: over-flagging a benign numeric column is over-redaction,
 the safe failure mode, and the override exists to pin such a column back to keep.
 """
-from proxy.detection.engine import build_analyzer
+from proxy.detection.engine import blank_nlp_engine, build_analyzer
 
 
 class Detector:
     def __init__(self, nlp_engine=None, model=None, languages=("en",),
-                 score_threshold=0.5, finance=True, batch_size=32):
+                 score_threshold=0.5, finance=True, batch_size=32, ner=True):
+        if not ner and nlp_engine is None:
+            nlp_engine = blank_nlp_engine(languages[0])   # pattern-only, no model/NER cost
         self._build_kwargs = dict(nlp_engine=nlp_engine, model=model,
                                   languages=languages, finance=finance)
         self.score_threshold = score_threshold
-        self.batch_size = batch_size      # nlp.pipe batch; ~3.4x and result-identical. n_process was flat in the sweep, so omitted.
+        self.batch_size = batch_size
+        self.ner = ner
         self._analyzer = None
 
     @property
@@ -26,7 +29,7 @@ class Detector:
             self._analyzer = build_analyzer(**self._build_kwargs)
         return self._analyzer
 
-    def analyze_table(self, table, language="en", override=None,
+    def analyze_table(self, table, language="en", override=None, entities=None,
                       selection_strategy="most_common"):
         from presidio_structured import PandasAnalysisBuilder
         builder = PandasAnalysisBuilder(analyzer=self.analyzer,
@@ -38,6 +41,8 @@ class Detector:
         # precision pass: strict identifiers beat NER guesses, bare-int DATE_TIME demoted
         from proxy.detection.precision import refine_mapping
         mapping = refine_mapping(table, mapping)
+        if entities is not None:
+            mapping = {c: e for c, e in mapping.items() if e in entities}  # scope to requested types
         if override:
             for col, ent in override.items():
                 if ent is None:
