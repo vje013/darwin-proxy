@@ -151,9 +151,14 @@ def _report(manifest, out_path):
     print("DARWIN PROXY - Semantic Abstraction Complete")
     print("=" * 78)
     print(f"records:    {manifest.records}")
+    print(f"mode:       {manifest.detection_mode}")
     print(f"detected:   {manifest.detection}")
     print(f"operators:  {manifest.operators}")
     print(f"kept:       {', '.join(manifest.kept_columns)}")
+    if manifest.detection_mode == "pattern-only":
+        print("            WARNING: NER off (pattern-only). Names, organizations, and")
+        print("            locations were NOT scanned. Kept columns may contain")
+        print("            unredacted PII. Re-run without --fast/--no-ner for name detection.")
     print(f"reversible: {manifest.reversibility}")
     if g.get("assessed"):
         print(f"re-id gate: k={g.get('k')} (threshold {g.get('threshold')}) "

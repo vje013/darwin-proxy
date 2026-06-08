@@ -97,3 +97,26 @@ def test_fast_flag_sets_pattern_only(tmp_path, monkeypatch):
     import json
     m = json.loads((tmp_path / "out.csv.manifest.json").read_text())
     assert captured["ner"] is False and m["detection_mode"] == "pattern-only"
+
+
+def test_report_warns_on_pattern_only(tmp_path, monkeypatch, capsys):
+    # pattern-only output must surface the mode and warn that names were not scanned
+    def fast_proxy(args):
+        return Proxy(nlp_engine=_Blank(), signing_key=generate_key(), ner=False, k_threshold=2)
+    monkeypatch.setattr(cli, "_build_proxy", fast_proxy)
+    src = tmp_path / "in.csv"; src.write_text(CSV)
+    cli.main(["abstract", str(src), "-o", str(tmp_path / "out.csv"), "--fast"])
+    out = capsys.readouterr().out
+    assert "mode:       pattern-only" in out
+    assert "NER off" in out and "NOT scanned" in out and "unredacted PII" in out
+
+
+def test_report_no_warning_in_full_mode(tmp_path, monkeypatch, capsys):
+    def full_proxy(args):
+        return Proxy(nlp_engine=_Blank(), signing_key=generate_key(), ner=True, k_threshold=2)
+    monkeypatch.setattr(cli, "_build_proxy", full_proxy)
+    src = tmp_path / "in.csv"; src.write_text(CSV)
+    cli.main(["abstract", str(src), "-o", str(tmp_path / "out.csv")])
+    out = capsys.readouterr().out
+    assert "mode:       full" in out
+    assert "WARNING" not in out
