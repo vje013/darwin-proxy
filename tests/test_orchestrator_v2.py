@@ -95,3 +95,9 @@ def test_abstract_file_writes_output_and_manifest(tmp_path):
 def test_unsigned_when_sign_false():
     out, manifest = _proxy(key="K").abstract_table(_table(), sign=False)
     assert manifest.signature == "" and manifest.signer_pubkey == ""
+
+
+def test_proxy_threads_batch_size():
+    px = Proxy(nlp_engine=_Blank(), signing_key=generate_key(), batch_size=16)
+    assert px.detector.batch_size == 16
+    assert Proxy(nlp_engine=_Blank(), signing_key=generate_key()).detector.batch_size == 32

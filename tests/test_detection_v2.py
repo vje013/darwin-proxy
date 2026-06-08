@@ -112,3 +112,20 @@ def test_detection_perf(detector, perf_check):
     detector.analyze_table(t)
     dt = time.perf_counter() - t0
     perf_check.check("detect_cols_per_sec", 3 / dt, higher_is_better=True)
+
+
+def test_batch_size_is_result_identical():
+    # batching changes how docs feed nlp.pipe, never the result
+    t = _df(email=["a@x.com", "b@y.com", "c@z.com"],
+            ssn=["123-45-6789", "987-65-4320", "078-05-1120"],
+            routing=["021000021", "011401533", "091000019"])
+    maps = []
+    for bs in (1, 8, 32):
+        d = _blank_detector()
+        d.batch_size = bs
+        maps.append(d.analyze_table(t))
+    assert maps[0] == maps[1] == maps[2]
+
+
+def test_detector_default_batch_size():
+    assert _blank_detector().batch_size == 32
